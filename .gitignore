@@ -1,0 +1,57 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+venv.bak/
+
+# Pytest / test artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Installer logs
+pip-log.txt
+
+# PyCharm / JetBrains
+.idea/
+
+# VS Code
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local env files
+.env
+.env.*
+credentials.json
+
+# Database / data
+*.sqlite3
+*.db
+*.sqlite
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Misc
+.mypy_cache/
+.pytest_cache/
+.ropeproject/
