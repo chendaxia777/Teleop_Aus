@@ -41,7 +41,7 @@
     /// See https://docs.rs/zenoh/latest/zenoh/config/struct.EndPoint.html
     endpoints: [
       // "tcp/10.147.20.24:7447"
-      "tcp/192.168.1.118:7447"
+      "tcp/10.78.62.83:7447"
       // "<proto>/<address>"
     ],
 
@@ -91,7 +91,8 @@
     ///
     /// See https://docs.rs/zenoh/latest/zenoh/config/struct.EndPoint.html
     endpoints: [
-      "tcp/[::]:7447"
+      // "tcp/[::]:7447"
+      "tcp/0.0.0.0:7447"
     ],
 
     /// Global listen configuration,
