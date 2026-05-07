@@ -6,7 +6,11 @@ def read_temp():
     return random.randint(15, 30)
 
 if __name__ == "__main__":
-    with zenoh.open(zenoh.Config()) as session:
+    config = zenoh.Config()
+    config.insert_json5("mode", '"client"')
+    config.insert_json5("connect/endpoints", '["tcp/192.168.1.118:7447"]')
+    
+    with zenoh.open(config) as session:
         key = 'myhome/kitchen/temp'
         pub = session.declare_publisher(key)
         while True:

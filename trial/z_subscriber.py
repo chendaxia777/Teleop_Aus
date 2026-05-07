@@ -4,6 +4,9 @@ def listener(sample):
     print(f"Received {sample.kind} ('{sample.key_expr}': '{sample.payload.to_string()}')")
 
 if __name__ == "__main__":
-    with zenoh.open(zenoh.Config()) as session:
+    config = zenoh.Config()
+    config.insert_json5("mode", '"client"')
+    config.insert_json5("connect/endpoints", '["tcp/192.168.1.118:7447"]')
+    with zenoh.open(config) as session:
         sub = session.declare_subscriber('myhome/kitchen/temp', listener)
         time.sleep(60)
