@@ -8,7 +8,7 @@ def read_temp():
 if __name__ == "__main__":
     config = zenoh.Config()
     config.insert_json5("mode", '"client"')
-    config.insert_json5("connect/endpoints", '["tcp/192.168.1.118:7447"]')
+    config.insert_json5("connect/endpoints", '["tcp/10.78.62.83:7447"]')
     
     with zenoh.open(config) as session:
         key = 'myhome/kitchen/temp'
