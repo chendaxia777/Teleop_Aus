@@ -15,19 +15,43 @@ import time
 
 import zenoh
 
+DEFAULT_KEY = "example/command"
+DEFAULT_ECHO_KEY = "example/command/echo"
 
-def main(conf: zenoh.Config, key: str):
+
+def parse_command(payload: str) -> tuple[int, int]:
+    fields = {}
+    for part in payload.split(";", 2)[:2]:
+        name, value = part.split("=", 1)
+        fields[name] = value
+
+    return int(fields["seq"]), int(fields["timestamp_ns"])
+
+
+def main(conf: zenoh.Config, key: str, echo_key: str):
     # initiate logging
     zenoh.init_log_from_env_or("error")
 
     print("Opening session...")
     with zenoh.open(conf) as session:
         print(f"Declaring Subscriber on '{key}'...")
+        print(f"Declaring Publisher on '{echo_key}'...")
+        pub = session.declare_publisher(echo_key)
 
         def listener(sample: zenoh.Sample):
+            payload = sample.payload.to_string()
             print(
-                f">> [Subscriber] Received {sample.kind} ('{sample.key_expr}': '{sample.payload.to_string()}')"
+                f">> [Subscriber] Received {sample.kind} ('{sample.key_expr}': '{payload}')"
             )
+            try:
+                seq, timestamp_ns = parse_command(payload)
+            except (KeyError, ValueError) as exc:
+                print(f"Malformed command payload '{payload}': {exc}")
+                return
+
+            echo_payload = f"seq={seq};timestamp_ns={timestamp_ns}"
+            # print(f"<< [Publisher] Echoing ('{echo_key}': '{echo_payload}')")
+            pub.put(echo_payload)
 
         session.declare_subscriber(key, listener)
 
@@ -48,12 +72,19 @@ if __name__ == "__main__":
         "--key",
         "-k",
         dest="key",
-        default="demo/example/zenoh-python-pub",
+        default=DEFAULT_KEY,
         type=str,
         help="The key expression to subscribe to.",
+    )
+    parser.add_argument(
+        "--echo-key",
+        dest="echo_key",
+        default=DEFAULT_ECHO_KEY,
+        type=str,
+        help="The key expression to publish echoed timestamps onto.",
     )
 
     args = parser.parse_args()
     conf = common.get_config_from_args(args)
 
-    main(conf, args.key)
+    main(conf, args.key, args.echo_key)
