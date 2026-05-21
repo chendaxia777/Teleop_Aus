@@ -77,7 +77,7 @@ def main(
             time.sleep(interval)
             timestamp_ns = time.perf_counter_ns()
             buf = f"seq={idx};timestamp_ns={timestamp_ns};payload={payload}"
-            # print(f"Putting Data ('{key}': '{buf}')...")
+            print(f"Putting Data ('{key}': '{buf}')...")
             pub.put(buf)
 
         if iter is not None:
@@ -111,7 +111,7 @@ if __name__ == "__main__":
         "--payload",
         "-p",
         dest="payload",
-        default="Pub from Python!",
+        default="Example message",
         type=str,
         help="The payload to publish.",
     )

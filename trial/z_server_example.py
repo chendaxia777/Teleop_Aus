@@ -65,7 +65,7 @@ def main(conf: zenoh.Config, key: str, echo_key: str):
                 return
 
             echo_payload = f"seq={seq};timestamp_ns={timestamp_ns}"
-            # print(f"<< [Publisher] Echoing ('{echo_key}': '{echo_payload}')")
+            print(f"<< [Publisher] Echoing ('{echo_key}': '{echo_payload}')")
             pub.put(echo_payload)
 
         session.declare_subscriber(key, listener)
