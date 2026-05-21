@@ -1,0 +1,19 @@
+{
+    "sender": {
+        "device": "/dev/video4",
+        "destination_ip": "10.147.20.186",
+        "width": 1920,
+        "height": 1080,
+        "framerate": 30,
+        "bitrate": 30000,
+        "metrics_log_dir": "logs/1080p"
+    },
+    "common": {
+        "udp_port": 5004
+    },
+    "receiver": {
+        "jitterbuffer_latency": 200,
+        "enable_latency_tracer": false,
+        "sender_ip": "10.147.20.24"
+    }
+}
