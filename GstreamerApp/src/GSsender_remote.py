@@ -2,10 +2,11 @@
 """
 GStreamer Video Sender Script
 
-Captures video from a V4L2 device, encodes it with H.264, and streams via UDP/RTP.
+Captures video from a configurable camera source, encodes it with H.264, and
+streams via UDP/RTP.
 
 Equivalent to:
-gst-launch-1.0 -e -v v4l2src device=/dev/video0 do-timestamp=true ! \
+gst-launch-1.0 -e -v ksvideosrc device-index=0 do-timestamp=true ! \
     image/jpeg,width=1920,height=1080,framerate=30/1 ! jpegdec ! videoconvert ! \
     queue max-size-buffers=1 leaky=downstream ! \
     x264enc tune=zerolatency speed-preset=ultrafast bitrate=6000 key-int-max=60 bframes=0 ! \
@@ -54,19 +55,27 @@ def load_config(config_path=None):
 class GStreamerSender:
     def __init__(self, device="/dev/video0", host="10.20.0.254", port=5004,
                  width=1920, height=1080, framerate=30, bitrate=6000,
+                 source_element=None, device_index=0, device_name=None,
+                 device_path=None, input_format="image/jpeg", source_caps=None,
                  output_dir=None, filename_prefix="gstreamer_metrics",
                  enable_video_recording=False, video_filename_prefix="video_recording"):
         """
         Initialize the GStreamer sender pipeline.
         
         Args:
-            device: V4L2 device path (e.g., /dev/video0)
+            device: V4L2/DirectShow device path when the selected source supports it
             host: Destination IP address
             port: Destination UDP port
             width: Video width in pixels
             height: Video height in pixels
             framerate: Video framerate
             bitrate: H.264 encoding bitrate in kbps
+            source_element: GStreamer camera source element (ksvideosrc on Windows)
+            device_index: Zero-based camera index for Windows camera sources
+            device_name: Human-readable camera name for Windows camera sources
+            device_path: Device path for Windows camera sources
+            input_format: Source media type, e.g. image/jpeg or video/x-raw
+            source_caps: Complete caps string override for the camera source
             output_dir: Directory for saving metrics CSV and video files
             filename_prefix: Prefix for metrics CSV filename
             enable_video_recording: Enable video file recording
@@ -79,6 +88,12 @@ class GStreamerSender:
         self.height = height
         self.framerate = framerate
         self.bitrate = bitrate
+        self.source_element = source_element or ("ksvideosrc" if os.name == "nt" else "v4l2src")
+        self.device_index = device_index
+        self.device_name = device_name
+        self.device_path = device_path
+        self.input_format = input_format or "image/jpeg"
+        self.source_caps = source_caps
         
         self.pipeline = None
         self.loop = None
@@ -135,6 +150,60 @@ class GStreamerSender:
         
         # Stopping guard
         self._stopping = False
+
+    def _set_optional_property(self, element, property_name, value):
+        """Set a GStreamer property only when the element exposes it."""
+        if value is None:
+            return
+        if element.find_property(property_name):
+            element.set_property(property_name, value)
+
+    def _create_source(self):
+        """Create the configured camera source, with Windows-friendly fallbacks."""
+        candidates = [self.source_element]
+        if os.name == "nt":
+            candidates.extend(["ksvideosrc", "dshowvideosrc", "mfvideosrc", "autovideosrc"])
+        else:
+            candidates.extend(["v4l2src", "autovideosrc"])
+
+        seen = set()
+        for element_name in candidates:
+            if not element_name or element_name in seen:
+                continue
+            seen.add(element_name)
+
+            source = Gst.ElementFactory.make(element_name, "source")
+            if source is None:
+                continue
+
+            self._set_optional_property(source, "do-timestamp", True)
+            self._set_optional_property(source, "device-index", self.device_index)
+            self._set_optional_property(source, "device-name", self.device_name)
+            self._set_optional_property(source, "device-path", self.device_path)
+
+            if element_name == "v4l2src":
+                self._set_optional_property(source, "device", self.device)
+            elif element_name == "dshowvideosrc":
+                self._set_optional_property(source, "device", self.device_path)
+
+            print(f"Using video source element: {element_name}")
+            return source, element_name
+
+        print(f"Error: Could not create any video source from candidates: {', '.join(candidates)}")
+        return None, None
+
+    def _build_source_caps(self):
+        """Build source caps from config, allowing a full caps override."""
+        if self.source_caps:
+            return self.source_caps
+
+        caps_parts = [
+            self.input_format,
+            f"width={self.width}",
+            f"height={self.height}",
+            f"framerate={self.framerate}/1",
+        ]
+        return ",".join(caps_parts)
     
     def _init_csv(self):
         """Initialize CSV file for logging metrics."""
@@ -178,20 +247,17 @@ class GStreamerSender:
         self.pipeline = Gst.Pipeline.new("video-sender")
         
         # Create elements
-        # Source: V4L2 video capture
-        source = Gst.ElementFactory.make("v4l2src", "source")
-        source.set_property("device", self.device)
-        source.set_property("do-timestamp", True)
+        # Source: configurable camera capture. On Windows, gst_remote.json uses ksvideosrc.
+        source, source_name = self._create_source()
         
-        # Caps filter for MJPEG input
+        # Caps filter for camera input
         caps_filter = Gst.ElementFactory.make("capsfilter", "caps_filter")
-        caps = Gst.Caps.from_string(
-            f"image/jpeg,width={self.width},height={self.height},framerate={self.framerate}/1"
-        )
+        caps = Gst.Caps.from_string(self._build_source_caps())
         caps_filter.set_property("caps", caps)
         
-        # JPEG decoder
-        jpegdec = Gst.ElementFactory.make("jpegdec", "jpegdec")
+        # JPEG decoder is only needed when the camera outputs MJPEG.
+        needs_jpegdec = self.input_format == "image/jpeg"
+        jpegdec = Gst.ElementFactory.make("jpegdec", "jpegdec") if needs_jpegdec else None
         
         # Video converter
         videoconvert = Gst.ElementFactory.make("videoconvert", "videoconvert")
@@ -262,10 +328,13 @@ class GStreamerSender:
         udpsink.set_property("async", False)
         
         # Check all elements were created successfully
-        elements = [source, caps_filter, jpegdec, videoconvert, queue, 
-                    encoder, h264parse, rtppay, udpsink]
-        element_names = ["v4l2src", "capsfilter", "jpegdec", "videoconvert", 
-                         "queue", "x264enc", "h264parse", "rtph264pay", "udpsink"]
+        elements = [source, caps_filter]
+        element_names = [source_name or self.source_element, "capsfilter"]
+        if needs_jpegdec:
+            elements.append(jpegdec)
+            element_names.append("jpegdec")
+        elements.extend([videoconvert, queue, encoder, h264parse, rtppay, udpsink])
+        element_names.extend(["videoconvert", "queue", "x264enc", "h264parse", "rtph264pay", "udpsink"])
         
         for elem, name in zip(elements, element_names):
             if elem is None:
@@ -294,11 +363,15 @@ class GStreamerSender:
         if not source.link(caps_filter):
             print("Error: Could not link source to caps_filter")
             return False
-        if not caps_filter.link(jpegdec):
-            print("Error: Could not link caps_filter to jpegdec")
-            return False
-        if not jpegdec.link(videoconvert):
-            print("Error: Could not link jpegdec to videoconvert")
+        if needs_jpegdec:
+            if not caps_filter.link(jpegdec):
+                print("Error: Could not link caps_filter to jpegdec")
+                return False
+            if not jpegdec.link(videoconvert):
+                print("Error: Could not link jpegdec to videoconvert")
+                return False
+        elif not caps_filter.link(videoconvert):
+            print("Error: Could not link caps_filter to videoconvert")
             return False
         if not videoconvert.link(queue):
             print("Error: Could not link videoconvert to queue")
@@ -544,7 +617,7 @@ class GStreamerSender:
         self._start_tcp_server()
         
         # Start playing
-        print(f"Starting video stream from {self.device} to {self.host}:{self.port}")
+        print(f"Starting video stream from {self.source_element} to {self.host}:{self.port}")
         print(f"Resolution: {self.width}x{self.height} @ {self.framerate}fps")
         print(f"Bitrate: {self.bitrate} kbps")
         print("Press Ctrl+C to stop...")
@@ -689,6 +762,12 @@ def main():
         height=sender_config.get("height", 1080),
         framerate=sender_config.get("framerate", 30),
         bitrate=sender_config.get("bitrate", 6000),
+        source_element=sender_config.get("source_element"),
+        device_index=sender_config.get("device_index", 0),
+        device_name=sender_config.get("device_name"),
+        device_path=sender_config.get("device_path"),
+        input_format=sender_config.get("input_format", "image/jpeg"),
+        source_caps=sender_config.get("source_caps"),
         output_dir=sender_logging_config.get("output_dir"),
         filename_prefix=sender_logging_config.get("filename_prefix", "gstreamer_metrics"),
         enable_video_recording=sender_logging_config.get("enable_video_recording", False),
