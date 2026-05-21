@@ -12,11 +12,24 @@
 #   ZettaScale Zenoh Team, <zenoh@zettascale.tech>
 #
 import time
+import json
+from pathlib import Path
 
 import zenoh
 
 DEFAULT_KEY = "example/command"
 DEFAULT_ECHO_KEY = "example/command/echo"
+DEFAULT_PORT = 7447
+DEFAULT_SERVER_CONFIG = Path(__file__).with_name("z_server_config.json")
+
+
+def get_connect_endpoint_from_config(config_path: Path = DEFAULT_SERVER_CONFIG) -> str:
+    with config_path.open("r", encoding="utf-8") as config_file:
+        config = json.load(config_file)
+
+    ip_address = config["router_ip_address"]
+    port = config.get("port", DEFAULT_PORT)
+    return f"tcp/{ip_address}:{port}@"
 
 
 def parse_command(payload: str) -> tuple[int, int]:
@@ -85,6 +98,9 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    if args.connect is None:
+        args.connect = [get_connect_endpoint_from_config()]
+
     conf = common.get_config_from_args(args)
 
     main(conf, args.key, args.echo_key)
