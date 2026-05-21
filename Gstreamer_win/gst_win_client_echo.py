@@ -13,12 +13,14 @@ and timestamp back to the server over TCP.
 from __future__ import annotations
 
 import argparse
+import json
 import signal
 import socket
 import struct
 import sys
 import threading
 import time
+from pathlib import Path
 
 try:
     import gi
@@ -36,8 +38,30 @@ except (ImportError, ValueError) as exc:
 DEFAULT_SERVER_IP = "10.78.62.71"
 DEFAULT_UDP_PORT = 5004
 DEFAULT_ECHO_PORT = 5005
+DEFAULT_CONFIG_PATH = Path(__file__).with_name("gst_win_echo_config.json")
 RTP_EXTENSION_ID = 1
 ECHO_STRUCT = struct.Struct("!HQ")
+
+
+def load_config(config_path: str | Path | None) -> dict:
+    path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+    if not path.exists():
+        if config_path:
+            raise FileNotFoundError(f"Config file not found: {path}")
+        return {}
+    with path.open("r", encoding="utf-8") as config_file:
+        return json.load(config_file)
+
+
+def config_get(config: dict, section: str, key: str, default=None):
+    value = config.get(section, {}).get(key, default)
+    return default if value is None else value
+
+
+def choose(cli_value, config: dict, section: str, key: str, default=None):
+    if cli_value is not None:
+        return cli_value
+    return config_get(config, section, key, default)
 
 
 class WindowsTimestampEchoClient:
@@ -98,7 +122,7 @@ class WindowsTimestampEchoClient:
         decoder = Gst.ElementFactory.make("avdec_h264", "decoder")
         videoconvert = Gst.ElementFactory.make("videoconvert", "videoconvert")
         videosink = Gst.ElementFactory.make("autovideosink", "videosink")
-        videosink.set_property("sync", False)
+        videosink.set_property("sync", self.args.videosink_sync)
 
         elements = [udpsrc, jitterbuffer, depay, h264parse, decoder, videoconvert, videosink]
         for element in elements:
@@ -320,12 +344,25 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Windows GStreamer client: receive video and echo RTP timestamps."
     )
-    parser.add_argument("--server-ip", default=DEFAULT_SERVER_IP)
-    parser.add_argument("--udp-port", type=int, default=DEFAULT_UDP_PORT)
-    parser.add_argument("--echo-port", type=int, default=DEFAULT_ECHO_PORT)
-    parser.add_argument("--jitter-latency", type=int, default=0)
-    parser.add_argument("--payload-type", type=int, default=96)
-    return parser.parse_args()
+    parser.add_argument("--config", default=None, help=f"JSON config path (default: {DEFAULT_CONFIG_PATH})")
+    parser.add_argument("--server-ip", default=None)
+    parser.add_argument("--udp-port", type=int, default=None)
+    parser.add_argument("--echo-port", type=int, default=None)
+    parser.add_argument("--jitter-latency", type=int, default=None)
+    parser.add_argument("--payload-type", type=int, default=None)
+    parser.add_argument("--videosink-sync", action=argparse.BooleanOptionalAction, default=None)
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+    return argparse.Namespace(
+        config=args.config or str(DEFAULT_CONFIG_PATH),
+        server_ip=choose(args.server_ip, config, "network", "server_ip", DEFAULT_SERVER_IP),
+        udp_port=choose(args.udp_port, config, "network", "udp_port", DEFAULT_UDP_PORT),
+        echo_port=choose(args.echo_port, config, "network", "echo_port", DEFAULT_ECHO_PORT),
+        jitter_latency=choose(args.jitter_latency, config, "gstreamer", "jitter_latency", 0),
+        payload_type=choose(args.payload_type, config, "gstreamer", "payload_type", 96),
+        videosink_sync=choose(args.videosink_sync, config, "gstreamer", "videosink_sync", False),
+    )
 
 
 def main() -> int:

@@ -1,0 +1,36 @@
+{
+  "network": {
+    "server_ip": "10.78.62.71",
+    "client_ip": "10.78.62.148",
+    "udp_port": 5004,
+    "echo_port": 5005
+  },
+  "video": {
+    "source_element": "ksvideosrc",
+    "device_index": 0,
+    "device_name": null,
+    "device_path": null,
+    "input_format": "image/jpeg",
+    "source_caps": null,
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "gstreamer": {
+    "payload_type": 96,
+    "bitrate": 30000,
+    "key_int_max": 60,
+    "encoder_tune": 4,
+    "encoder_speed_preset": 1,
+    "encoder_bframes": 0,
+    "h264_config_interval": 1,
+    "queue_max_size_buffers": 1,
+    "queue_leaky": 2,
+    "udpsink_sync": false,
+    "udpsink_async": false,
+    "jitter_latency": 0,
+    "videosink_sync": false,
+    "avg_window": 100,
+    "max_rtt_ms": 5000.0
+  }
+}

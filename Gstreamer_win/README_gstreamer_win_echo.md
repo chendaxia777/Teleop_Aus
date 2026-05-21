@@ -41,6 +41,18 @@ Allow inbound traffic:
 
 ## Run
 
+Edit shared settings in:
+
+```powershell
+.\Gstreamer_win\gst_win_echo_config.json
+```
+
+Important sections:
+
+- `network`: server/client IP addresses and UDP/TCP ports
+- `video`: camera index, source element, resolution, FPS, and input caps
+- `gstreamer`: payload type, encoder bitrate/keyframe settings, queue/sink settings, and RTT averaging
+
 Start the server on `10.78.62.71`:
 
 ```powershell
@@ -51,6 +63,13 @@ Start the client on `10.78.62.148`:
 
 ```powershell
 python .\Gstreamer_win\gst_win_client_echo.py
+```
+
+To use another config file:
+
+```powershell
+python .\Gstreamer_win\gst_win_server_echo.py --config .\my_config.json
+python .\Gstreamer_win\gst_win_client_echo.py --config .\my_config.json
 ```
 
 The server prints RTT lines when the client receives RTP packets and echoes the

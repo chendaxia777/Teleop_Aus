@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
 import signal
 import socket
 import struct
 import sys
 import threading
 import time
+from pathlib import Path
 
 try:
     import gi
@@ -37,9 +39,31 @@ except (ImportError, ValueError) as exc:
 DEFAULT_CLIENT_IP = "10.78.62.148"
 DEFAULT_UDP_PORT = 5004
 DEFAULT_ECHO_PORT = 5005
+DEFAULT_CONFIG_PATH = Path(__file__).with_name("gst_win_echo_config.json")
 RTP_EXTENSION_ID = 1
 RTP_ONE_BYTE_EXTENSION_PROFILE = 0xBEDE
 ECHO_STRUCT = struct.Struct("!HQ")
+
+
+def load_config(config_path: str | Path | None) -> dict:
+    path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+    if not path.exists():
+        if config_path:
+            raise FileNotFoundError(f"Config file not found: {path}")
+        return {}
+    with path.open("r", encoding="utf-8") as config_file:
+        return json.load(config_file)
+
+
+def config_get(config: dict, section: str, key: str, default=None):
+    value = config.get(section, {}).get(key, default)
+    return default if value is None else value
+
+
+def choose(cli_value, config: dict, section: str, key: str, default=None):
+    if cli_value is not None:
+        return cli_value
+    return config_get(config, section, key, default)
 
 
 class WindowsTimestampEchoServer:
@@ -139,28 +163,28 @@ class WindowsTimestampEchoServer:
         videoconvert = Gst.ElementFactory.make("videoconvert", "videoconvert")
 
         queue = Gst.ElementFactory.make("queue", "queue")
-        queue.set_property("max-size-buffers", 1)
-        queue.set_property("leaky", 2)
+        queue.set_property("max-size-buffers", self.args.queue_max_size_buffers)
+        queue.set_property("leaky", self.args.queue_leaky)
 
         encoder = Gst.ElementFactory.make("x264enc", "encoder")
-        encoder.set_property("tune", 0x00000004)
-        encoder.set_property("speed-preset", 1)
+        encoder.set_property("tune", self.args.encoder_tune)
+        encoder.set_property("speed-preset", self.args.encoder_speed_preset)
         encoder.set_property("bitrate", self.args.bitrate)
         encoder.set_property("key-int-max", self.args.key_int_max)
-        encoder.set_property("bframes", 0)
+        encoder.set_property("bframes", self.args.encoder_bframes)
 
         h264parse = Gst.ElementFactory.make("h264parse", "h264parse")
-        h264parse.set_property("config-interval", 1)
+        h264parse.set_property("config-interval", self.args.h264_config_interval)
 
         rtppay = Gst.ElementFactory.make("rtph264pay", "rtppay")
         rtppay.set_property("pt", self.args.payload_type)
-        rtppay.set_property("config-interval", 1)
+        rtppay.set_property("config-interval", self.args.h264_config_interval)
 
         udpsink = Gst.ElementFactory.make("udpsink", "udpsink")
         udpsink.set_property("host", self.args.client_ip)
         udpsink.set_property("port", self.args.udp_port)
-        udpsink.set_property("sync", False)
-        udpsink.set_property("async", False)
+        udpsink.set_property("sync", self.args.udpsink_sync)
+        udpsink.set_property("async", self.args.udpsink_async)
 
         elements = [source, caps_filter]
         if jpegdec is not None:
@@ -446,24 +470,63 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Windows GStreamer server: stream camera video and print timestamp echo RTT."
     )
-    parser.add_argument("--client-ip", default=DEFAULT_CLIENT_IP)
-    parser.add_argument("--udp-port", type=int, default=DEFAULT_UDP_PORT)
-    parser.add_argument("--echo-port", type=int, default=DEFAULT_ECHO_PORT)
-    parser.add_argument("--source-element", default="ksvideosrc")
-    parser.add_argument("--device-index", type=int, default=0)
+    parser.add_argument("--config", default=None, help=f"JSON config path (default: {DEFAULT_CONFIG_PATH})")
+    parser.add_argument("--client-ip", default=None)
+    parser.add_argument("--udp-port", type=int, default=None)
+    parser.add_argument("--echo-port", type=int, default=None)
+    parser.add_argument("--source-element", default=None)
+    parser.add_argument("--device-index", type=int, default=None)
     parser.add_argument("--device-name", default=None)
     parser.add_argument("--device-path", default=None)
-    parser.add_argument("--input-format", default="image/jpeg", choices=["image/jpeg", "video/x-raw"])
+    parser.add_argument("--input-format", default=None, choices=["image/jpeg", "video/x-raw"])
     parser.add_argument("--source-caps", default=None, help="Full source caps override.")
-    parser.add_argument("--width", type=int, default=1920)
-    parser.add_argument("--height", type=int, default=1080)
-    parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument("--bitrate", type=int, default=30000)
-    parser.add_argument("--key-int-max", type=int, default=60)
-    parser.add_argument("--payload-type", type=int, default=96)
-    parser.add_argument("--avg-window", type=int, default=100)
-    parser.add_argument("--max-rtt-ms", type=float, default=5000.0)
-    return parser.parse_args()
+    parser.add_argument("--width", type=int, default=None)
+    parser.add_argument("--height", type=int, default=None)
+    parser.add_argument("--fps", type=int, default=None)
+    parser.add_argument("--bitrate", type=int, default=None)
+    parser.add_argument("--key-int-max", type=int, default=None)
+    parser.add_argument("--encoder-tune", type=int, default=None)
+    parser.add_argument("--encoder-speed-preset", type=int, default=None)
+    parser.add_argument("--encoder-bframes", type=int, default=None)
+    parser.add_argument("--h264-config-interval", type=int, default=None)
+    parser.add_argument("--queue-max-size-buffers", type=int, default=None)
+    parser.add_argument("--queue-leaky", type=int, default=None)
+    parser.add_argument("--udpsink-sync", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--udpsink-async", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--payload-type", type=int, default=None)
+    parser.add_argument("--avg-window", type=int, default=None)
+    parser.add_argument("--max-rtt-ms", type=float, default=None)
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+    return argparse.Namespace(
+        config=args.config or str(DEFAULT_CONFIG_PATH),
+        client_ip=choose(args.client_ip, config, "network", "client_ip", DEFAULT_CLIENT_IP),
+        udp_port=choose(args.udp_port, config, "network", "udp_port", DEFAULT_UDP_PORT),
+        echo_port=choose(args.echo_port, config, "network", "echo_port", DEFAULT_ECHO_PORT),
+        source_element=choose(args.source_element, config, "video", "source_element", "ksvideosrc"),
+        device_index=choose(args.device_index, config, "video", "device_index", 0),
+        device_name=choose(args.device_name, config, "video", "device_name", None),
+        device_path=choose(args.device_path, config, "video", "device_path", None),
+        input_format=choose(args.input_format, config, "video", "input_format", "image/jpeg"),
+        source_caps=choose(args.source_caps, config, "video", "source_caps", None),
+        width=choose(args.width, config, "video", "width", 1920),
+        height=choose(args.height, config, "video", "height", 1080),
+        fps=choose(args.fps, config, "video", "fps", 30),
+        bitrate=choose(args.bitrate, config, "gstreamer", "bitrate", 30000),
+        key_int_max=choose(args.key_int_max, config, "gstreamer", "key_int_max", 60),
+        encoder_tune=choose(args.encoder_tune, config, "gstreamer", "encoder_tune", 4),
+        encoder_speed_preset=choose(args.encoder_speed_preset, config, "gstreamer", "encoder_speed_preset", 1),
+        encoder_bframes=choose(args.encoder_bframes, config, "gstreamer", "encoder_bframes", 0),
+        h264_config_interval=choose(args.h264_config_interval, config, "gstreamer", "h264_config_interval", 1),
+        queue_max_size_buffers=choose(args.queue_max_size_buffers, config, "gstreamer", "queue_max_size_buffers", 1),
+        queue_leaky=choose(args.queue_leaky, config, "gstreamer", "queue_leaky", 2),
+        udpsink_sync=choose(args.udpsink_sync, config, "gstreamer", "udpsink_sync", False),
+        udpsink_async=choose(args.udpsink_async, config, "gstreamer", "udpsink_async", False),
+        payload_type=choose(args.payload_type, config, "gstreamer", "payload_type", 96),
+        avg_window=choose(args.avg_window, config, "gstreamer", "avg_window", 100),
+        max_rtt_ms=choose(args.max_rtt_ms, config, "gstreamer", "max_rtt_ms", 5000.0),
+    )
 
 
 def main() -> int:
