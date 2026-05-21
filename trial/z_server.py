@@ -19,6 +19,7 @@ import zenoh
 
 DEFAULT_KEY = "example/command"
 DEFAULT_ECHO_KEY = "example/command/echo"
+DEFAULT_PROTOCOL = "tcp"
 DEFAULT_PORT = 7447
 DEFAULT_SERVER_CONFIG = Path(__file__).with_name("z_server_config.json")
 
@@ -27,9 +28,10 @@ def get_connect_endpoint_from_config(config_path: Path = DEFAULT_SERVER_CONFIG) 
     with config_path.open("r", encoding="utf-8") as config_file:
         config = json.load(config_file)
 
+    protocol = config.get("protocol", DEFAULT_PROTOCOL)
     ip_address = config["router_ip_address"]
     port = config.get("port", DEFAULT_PORT)
-    return f"tcp/{ip_address}:{port}@"
+    return f"{protocol}/{ip_address}:{port}"
 
 
 def parse_command(payload: str) -> tuple[int, int]:

@@ -1,4 +1,5 @@
 {
+  "protocol": "tcp",
   "router_ip_address": "10.78.62.148",
   "port": 7447
 }
