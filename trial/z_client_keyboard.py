@@ -111,7 +111,7 @@ def main():
                 timestamp_ns = time.perf_counter_ns()
                 key_payload = "+".join(held_keys)
                 buf = f"seq={seq};timestamp_ns={timestamp_ns};payload={key_payload}"
-                print(f"Putting Data ('{DEFAULT_KEY}': '{buf}')...")
+                print(f"Putting Data '{buf}')...")
                 pub.put(buf)
 
             elapsed = time.perf_counter() - frame_start

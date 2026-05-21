@@ -50,7 +50,7 @@ def main():
         def listener(sample: zenoh.Sample):
             payload = sample.payload.to_string()
             print(
-                f">> [Subscriber] Received {sample.kind} ('{sample.key_expr}': '{payload}')"
+                f">> [Subscriber] Received ('{payload}')"
             )
             try:
                 seq, timestamp_ns = parse_command(payload)
@@ -59,7 +59,7 @@ def main():
                 return
 
             echo_payload = f"seq={seq};timestamp_ns={timestamp_ns}"
-            print(f"<< [Publisher] Echoing ('{DEFAULT_ECHO_KEY}': '{echo_payload}')")
+            # print(f"<< [Publisher] Echoing ('{echo_payload}')")
             pub.put(echo_payload)
 
         session.declare_subscriber(DEFAULT_KEY, listener)
