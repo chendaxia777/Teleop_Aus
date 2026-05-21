@@ -38,6 +38,7 @@ DEFAULT_CLIENT_IP = "10.78.62.148"
 DEFAULT_UDP_PORT = 5004
 DEFAULT_ECHO_PORT = 5005
 RTP_EXTENSION_ID = 1
+RTP_ONE_BYTE_EXTENSION_PROFILE = 0xBEDE
 ECHO_STRUCT = struct.Struct("!HQ")
 
 
@@ -207,43 +208,71 @@ class WindowsTimestampEchoServer:
         pad.add_probe(Gst.PadProbeType.BUFFER, self._on_rtp_out)
         return True
 
-    def _add_extension(self, rtp, payload: bytes) -> bool:
-        attempts = (
-            lambda: rtp.add_extension_onebyte_header(RTP_EXTENSION_ID, payload, len(payload)),
-            lambda: rtp.add_extension_onebyte_header(RTP_EXTENSION_ID, list(payload), len(payload)),
-            lambda: rtp.add_extension_onebyte_header(RTP_EXTENSION_ID, payload),
-            lambda: rtp.add_extension_onebyte_header(RTP_EXTENSION_ID, list(payload)),
-        )
-        for attempt in attempts:
-            try:
-                return bool(attempt())
-            except TypeError:
-                continue
-        return False
-
     def _on_rtp_out(self, pad, info):
         buffer = info.get_buffer()
         if buffer is None:
             return Gst.PadProbeReturn.OK
 
-        success, rtp = GstRtp.RTPBuffer.map(buffer, Gst.MapFlags.READWRITE)
-        if not success:
-            self._warn_extension_once("Could not map RTP buffer READWRITE; timestamp extension was not embedded.")
+        try:
+            timestamped_buffer = self._make_timestamped_rtp_buffer(buffer)
+        except Exception as exc:
+            self._warn_extension_once(f"Could not embed RTP timestamp extension: {exc}")
             return Gst.PadProbeReturn.OK
 
-        try:
-            seq = rtp.get_seq()
-            timestamp_ns = time.time_ns()
-            payload = ECHO_STRUCT.pack(seq, timestamp_ns)
-            self.sent_packets += 1
-            if self._add_extension(rtp, payload):
-                self.extension_packets += 1
-            else:
-                self._warn_extension_once("Could not add RTP one-byte header extension.")
-        finally:
-            rtp.unmap()
+        if timestamped_buffer is None:
+            return Gst.PadProbeReturn.OK
+
+        info.set_buffer(timestamped_buffer)
+        self.extension_packets += 1
 
         return Gst.PadProbeReturn.OK
+
+    def _make_timestamped_rtp_buffer(self, buffer):
+        packet = buffer.extract_dup(0, buffer.get_size())
+        if len(packet) < 12:
+            self._warn_extension_once("RTP packet is too short; timestamp extension was not embedded.")
+            return None
+
+        first_byte = packet[0]
+        version = first_byte >> 6
+        has_extension = bool(first_byte & 0x10)
+        csrc_count = first_byte & 0x0F
+        header_end = 12 + (4 * csrc_count)
+        if version != 2 or len(packet) < header_end:
+            self._warn_extension_once("Unsupported RTP header; timestamp extension was not embedded.")
+            return None
+        if has_extension:
+            self._warn_extension_once("RTP packet already has an extension; timestamp extension was not embedded.")
+            return None
+
+        seq = struct.unpack_from("!H", packet, 2)[0]
+        timestamp_ns = time.time_ns()
+        extension_payload = ECHO_STRUCT.pack(seq, timestamp_ns)
+        extension_element = bytes([(RTP_EXTENSION_ID << 4) | (len(extension_payload) - 1)]) + extension_payload
+        padding_len = (-len(extension_element)) % 4
+        extension_block = extension_element + (b"\x00" * padding_len)
+        extension_words = len(extension_block) // 4
+        extension_header = struct.pack("!HH", RTP_ONE_BYTE_EXTENSION_PROFILE, extension_words)
+
+        new_packet = bytearray()
+        new_packet.extend(packet[:header_end])
+        new_packet[0] = first_byte | 0x10
+        new_packet.extend(extension_header)
+        new_packet.extend(extension_block)
+        new_packet.extend(packet[header_end:])
+
+        self.sent_packets += 1
+        new_buffer = Gst.Buffer.new_wrapped(bytes(new_packet))
+        self._copy_buffer_timing(buffer, new_buffer)
+        return new_buffer
+
+    def _copy_buffer_timing(self, source, target):
+        target.pts = source.pts
+        target.dts = source.dts
+        target.duration = source.duration
+        target.offset = source.offset
+        target.offset_end = source.offset_end
+        target.set_flags(source.get_flags())
 
     def _warn_extension_once(self, message: str):
         now_ns = time.time_ns()
