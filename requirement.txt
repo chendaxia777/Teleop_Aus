@@ -1,0 +1,5 @@
+# reuqired packages
+eclipse-zenoh
+gstreamer-bundle
+
+
