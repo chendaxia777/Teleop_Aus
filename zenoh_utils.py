@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -9,6 +10,34 @@ import zenoh
 
 DEFAULT_PROTOCOL = "tcp"
 DEFAULT_PORT = 7447
+
+
+def make_json_payload(seq: int, **fields) -> str:
+    payload = {
+        "seq": seq,
+        "timestamp_ns": time.perf_counter_ns(),
+        **fields,
+    }
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def make_json_echo_payload(seq: int, timestamp_ns: int) -> str:
+    return json.dumps(
+        {
+            "seq": seq,
+            "timestamp_ns": timestamp_ns,
+        },
+        separators=(",", ":"),
+    )
+
+
+def parse_json_timing_payload(payload: str) -> tuple[int, int]:
+    data = json.loads(payload)
+    return int(data["seq"]), int(data["timestamp_ns"])
+
+
+def calculate_latency_ms(timestamp_ns: int) -> float:
+    return (time.perf_counter_ns() - timestamp_ns) / 1_000_000
 
 
 class ZenohPubSubClient:

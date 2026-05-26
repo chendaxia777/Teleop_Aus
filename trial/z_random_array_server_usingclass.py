@@ -12,6 +12,7 @@ if str(ROOT_DIR) not in sys.path:
 import zenoh
 
 from zenoh_utils import ZenohPubSubClient
+from zenoh_utils import make_json_echo_payload
 
 
 DEFAULT_KEY = "example/random_array"
@@ -40,14 +41,7 @@ def main():
                 return
 
             print(f">> Received seq={seq} numbers={numbers}")
-            echo_payload = json.dumps(
-                {
-                    "seq": seq,
-                    "timestamp_ns": timestamp_ns,
-                    "numbers": numbers,
-                },
-                separators=(",", ":"),
-            )
+            echo_payload = make_json_echo_payload(seq, timestamp_ns)
             server.publish(DEFAULT_ECHO_KEY, echo_payload)
 
         server.declare_subscriber(DEFAULT_KEY, listener)
